@@ -41,10 +41,6 @@
             transition: transform 0.2s ease;
         }
 
-        .heart-wrapper:active {
-            transform: scale(0.95);
-        }
-
         svg {
             width: 250px;
             height: 250px;
@@ -59,14 +55,11 @@
             transition: all 0.4s ease;
         }
 
+        /* Состояние "Включено" */
         .is-lit #heart-path {
             fill: var(--heart-on);
-            filter: drop-shadow(0 0 30px var(--glow-color));
-        }
-
-        .is-lit .glow-circle {
-            opacity: 1;
-            transform: scale(1.2);
+            filter: drop-shadow(0 0 40px var(--glow-color));
+            transform: scale(1.1);
         }
 
         .glow-circle {
@@ -74,8 +67,8 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%) scale(0.8);
-            width: 200px;
-            height: 200px;
+            width: 220px;
+            height: 220px;
             background: var(--glow-color);
             border-radius: 50%;
             filter: blur(60px);
@@ -84,12 +77,25 @@
             transition: all 0.6s ease;
         }
 
+        .is-lit .glow-circle {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.3);
+            animation: pulse 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.7; }
+            50% { transform: translate(-50%, -50%) scale(1.4); opacity: 0.9; }
+            100% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.7; }
+        }
+
         .status-text {
-            margin-top: 30px;
-            color: #555;
-            font-size: 14px;
-            letter-spacing: 2px;
+            margin-top: 40px;
+            color: #444;
+            font-size: 12px;
+            letter-spacing: 3px;
             text-transform: uppercase;
+            transition: all 0.3s ease;
         }
 
         .is-lit .status-text {
@@ -97,36 +103,37 @@
             text-shadow: 0 0 10px var(--glow-color);
         }
 
-        /* Кнопка уведомлений */
         #notif-btn {
             position: fixed;
-            bottom: 30px;
-            background: none;
+            bottom: 40px;
+            background: rgba(255,255,255,0.05);
             border: 1px solid #333;
-            color: #555;
-            padding: 8px 15px;
-            border-radius: 20px;
+            color: #666;
+            padding: 10px 20px;
+            border-radius: 30px;
             font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 1px;
             cursor: pointer;
+            transition: all 0.3s ease;
         }
 
         #connection-error {
             position: fixed;
             top: 20px;
-            background: rgba(255,0,0,0.7);
+            background: rgba(255,31,75,0.9);
             color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
+            padding: 10px 25px;
+            border-radius: 30px;
             display: none;
             font-size: 12px;
+            z-index: 100;
         }
     </style>
 </head>
 <body>
 
-    <div id="connection-error">Ошибка подключения</div>
+    <div id="connection-error">Ошибка связи</div>
 
     <div class="container" id="app">
         <div class="heart-wrapper" id="heart-btn">
@@ -135,16 +142,18 @@
                 <path id="heart-path" d="M16 28.5L14.1 26.7C7.3 20.6 2.8 16.5 2.8 11.5C2.8 7.4 6 4.2 10.1 4.2C12.4 4.2 14.6 5.3 16 7C17.4 5.3 19.6 4.2 21.9 4.2C26 4.2 29.2 7.4 29.2 11.5C29.2 16.5 24.7 20.6 17.9 26.7L16 28.5Z" />
             </svg>
         </div>
-        <div class="status-text" id="status-label">Жду подключения...</div>
-        <button id="notif-btn">Включить уведомления</button>
+        <div class="status-text" id="status-label">Спящий режим</div>
+        <button id="notif-btn">Уведомления</button>
     </div>
 
-    <!-- Звук уведомления (короткое биение сердца) -->
+    <!-- Звук биения сердца -->
     <audio id="heart-sound" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3" preload="auto"></audio>
 
     <script>
+        // --- ДАННЫЕ SUPABASE ---
         const SUPABASE_URL = 'https://tfskozvwucqttjxkowwa.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmc2tvenZ3dWNxdHRqeGtvd3dhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMTg1NjYsImV4cCI6MjA4Nzc5NDU2Nn0.L7Jo06XbTy9PrvPudDmjI5gcMM8JF4Arwq8ckd350Lw';
+        
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         const app = document.getElementById('app');
@@ -152,15 +161,18 @@
         const statusLabel = document.getElementById('status-label');
         const notifBtn = document.getElementById('notif-btn');
         const heartSound = document.getElementById('heart-sound');
+        const errorMsg = document.getElementById('connection-error');
 
-        let lastState = false;
+        let isLitCurrently = false;
 
         async function init() {
-            const { data } = await supabaseClient.from('heart_status').select('is_lit').eq('id', 1).single();
+            // Загружаем начальное состояние из базы
+            const { data, error } = await supabaseClient.from('heart_status').select('is_lit').eq('id', 1).single();
             if (data) updateUI(data.is_lit, false);
 
+            // Подписываемся на Realtime изменения таблицы
             supabaseClient
-                .channel('heart-room')
+                .channel('heart-lamp')
                 .on('postgres_changes', 
                     { event: 'UPDATE', schema: 'public', table: 'heart_status', filter: 'id=eq.1' }, 
                     (payload) => {
@@ -171,50 +183,70 @@
         }
 
         function updateUI(isLit, shouldSound) {
+            isLitCurrently = isLit;
+            
             if (isLit) {
                 app.classList.add('is-lit');
-                statusLabel.innerText = "Сердце горит";
-                if (shouldSound && !lastState) {
+                statusLabel.innerText = "Сердце горит...";
+                if (shouldSound) {
+                    heartSound.currentTime = 0;
                     heartSound.play().catch(() => {});
-                    showNotification();
+                    showPush();
                 }
             } else {
                 app.classList.remove('is-lit');
-                statusLabel.innerText = "Жду касания";
+                statusLabel.innerText = "Коснись меня";
             }
-            lastState = isLit;
         }
 
-        async function setHeartState(state) {
-            await supabaseClient.from('heart_status').update({ is_lit: state }).eq('id', 1);
+        async function triggerHeart() {
+            // Если сердце уже горит — игнорируем нажатие
+            if (isLitCurrently) return;
+
+            // 1. Включаем статус в базе данных
+            const { error } = await supabaseClient.from('heart_status').update({ is_lit: true }).eq('id', 1);
+            
+            if (error) {
+                console.error(error);
+                return;
+            }
+
+            if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
+
+            // 2. Ставим таймер на 10 секунд для выключения (сработает у обоих)
+            setTimeout(async () => {
+                await supabaseClient.from('heart_status').update({ is_lit: false }).eq('id', 1);
+            }, 10000);
         }
 
-        // Работа с уведомлениями
+        // Запрос разрешения на уведомления
         notifBtn.addEventListener('click', async () => {
             const permission = await Notification.requestPermission();
             if (permission === 'granted') {
                 notifBtn.style.display = 'none';
-                new Notification("Сердечки-лампочки", { body: "Уведомления включены!" });
+                new Notification("Heart Lamp", { body: "Уведомления активированы!" });
             }
         });
 
-        function showNotification() {
+        // Функция показа Push-уведомления, когда приложение свернуто
+        function showPush() {
             if (Notification.permission === 'granted' && document.hidden) {
-                new Notification("Твое сердце горит", {
-                    body: "Кто-то касается своей лампы прямо сейчас...",
+                new Notification("Твое сердце горит!", {
+                    body: "Кто-то думает о тебе...",
                     icon: "https://cdn-icons-png.flaticon.com/512/833/833472.png"
                 });
             }
         }
 
-        // События касания
-        heartBtn.addEventListener('pointerdown', (e) => {
-            setHeartState(true);
-            if ('vibrate' in navigator) navigator.vibrate(60);
-        });
+        // Обработка клика по сердцу
+        heartBtn.addEventListener('click', triggerHeart);
 
-        heartBtn.addEventListener('pointerup', () => setHeartState(false));
-        heartBtn.addEventListener('pointerleave', () => setHeartState(false));
+        // Регистрация Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(console.error);
+            });
+        }
 
         init();
     </script>
